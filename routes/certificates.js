@@ -87,7 +87,16 @@ router.post('/certificates', authMiddleware, upload.single('photo'), async (req,
 // dashboard list
 router.get('/certificates', authMiddleware, async (req, res) => {
   const list = await Certificate.find().sort({ createdAt: -1 }).limit(500);
-  res.json(list);
+  const host = req.get('host');
+  const proto = req.protocol;
+  const updatedList = list.map(doc => {
+    let obj = doc.toObject();
+    if (obj.photoUrl && obj.photoUrl.startsWith('/uploads')) {
+      obj.photoUrl = proto + '://' + host + obj.photoUrl;
+    }
+    return obj;
+  });
+  res.json(updatedList);
 });
 
 
