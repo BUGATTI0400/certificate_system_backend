@@ -108,7 +108,7 @@ router.get('/certificates/:id', async (req, res) => {
   if (!doc) return res.status(404).json({ message: 'Not found' });
   // optionally modify photoUrl to be absolute
   const host = req.get('host');
-  const proto = req.protocol;
+  const proto = "https";
   if (doc.photoUrl && doc.photoUrl.startsWith('/uploads')) {
     doc.photoUrl = proto + '://' + host + doc.photoUrl;
   }
