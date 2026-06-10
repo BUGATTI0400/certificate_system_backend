@@ -224,7 +224,7 @@ router.get('/certificates/license/:licenseNumber', authMiddleware, async (req, r
 router.get('/certificates-next-number', authMiddleware, async (req, res) => {
   try {
     const lastCert = await Certificate.findOne().sort({ createdAt: -1 });
-    let nextNumber = 'HC-100001'; // Default starting number
+    let nextNumber = '461119526040'; // Default starting number
     
     if (lastCert && lastCert.healthCertificateNumber) {
       const match = lastCert.healthCertificateNumber.match(/\d+$/);
