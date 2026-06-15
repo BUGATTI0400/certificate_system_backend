@@ -2,24 +2,13 @@ const express = require('express');
 const router = express.Router();
 const Certificate = require('../models/Certificate');
 const jwt = require('jsonwebtoken');
-const multer = require('multer');
+const { upload, cloudinary } = require('../utils/upload');
 const path = require('path');
 const fs = require('fs');
 
-// Local disk storage for photos
+// Local disk storage for photos (kept for legacy photo paths if needed)
 const uploadsDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1e9) + path.extname(file.originalname);
-    cb(null, uniqueName);
-  }
-});
-
-const upload = multer({ storage });
-
 
 function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
@@ -35,7 +24,15 @@ function authMiddleware(req, res, next) {
 }
 
 // create certificate (accepts multipart form-data if photo uploaded)
-router.post('/certificates', authMiddleware, upload.single('photo'), async (req, res) => {
+router.post('/certificates', authMiddleware, (req, res, next) => {
+  upload.single('photo')(req, res, (err) => {
+    if (err) {
+      console.error('Upload Error:', JSON.stringify(err, null, 2));
+      return res.status(500).json({ message: 'File upload error', detail: err });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     const body = req.body;
     const uuid = require('crypto').randomBytes(8).toString('hex');
@@ -44,9 +41,9 @@ router.post('/certificates', authMiddleware, upload.single('photo'), async (req,
     let photoPublicId = '';
 
     if (req.file) {
-      // Save local file URL
-      photoUrl = '/uploads/' + req.file.filename;
-      photoPublicId = req.file.filename;
+      // Save cloudinary file URL
+      photoUrl = req.file.path;
+      photoPublicId = req.file.filename; // Cloudinary public_id
     }
 
     const data = {
@@ -108,7 +105,7 @@ router.get('/certificates/:id', async (req, res) => {
   if (!doc) return res.status(404).json({ message: 'Not found' });
   // optionally modify photoUrl to be absolute
   const host = req.get('host');
-  const proto = "https";
+  const proto = req.protocol;
   if (doc.photoUrl && doc.photoUrl.startsWith('/uploads')) {
     doc.photoUrl = proto + '://' + host + doc.photoUrl;
   }
@@ -116,7 +113,15 @@ router.get('/certificates/:id', async (req, res) => {
 });
 
 // update certificate
-router.put('/certificates/:id', authMiddleware, upload.single('photo'), async (req, res) => {
+router.put('/certificates/:id', authMiddleware, (req, res, next) => {
+  upload.single('photo')(req, res, (err) => {
+    if (err) {
+      console.error('Upload Error:', JSON.stringify(err, null, 2));
+      return res.status(500).json({ message: 'File upload error', detail: err });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     const id = req.params.id;
     const body = req.body;
@@ -148,17 +153,23 @@ router.put('/certificates/:id', authMiddleware, upload.single('photo'), async (r
 
     // if new photo uploaded
     if (req.file) {
-      // delete old local photo if exists
+      console.log('Uploaded File:', JSON.stringify(req.file, null, 2));
+
+      // delete old photo if exists
       if (cert.photoPublicId) {
         try {
-          const oldPath = path.join(uploadsDir, cert.photoPublicId);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          if (cert.photoUrl && cert.photoUrl.startsWith('/uploads')) {
+            const oldPath = path.join(uploadsDir, cert.photoPublicId);
+            if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          } else {
+            await cloudinary.uploader.destroy(cert.photoPublicId);
+          }
         } catch (err) {
           console.log('Error deleting old photo:', err);
         }
       }
-      cert.photoUrl = '/uploads/' + req.file.filename;
-      cert.photoPublicId = req.file.filename;
+      cert.photoUrl = req.file.path;
+      cert.photoPublicId = req.file.filename; // Cloudinary public_id
     }
 
     console.log('Update Request Body:', body);
@@ -183,11 +194,15 @@ router.delete('/certificates/:id', authMiddleware, async (req, res) => {
     const cert = await Certificate.findById(id);
     if (!cert) return res.status(404).json({ message: 'Not found' });
 
-    // delete local photo if exists
+    // delete photo if exists
     if (cert.photoPublicId) {
       try {
-        const oldPath = path.join(uploadsDir, cert.photoPublicId);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        if (cert.photoUrl && cert.photoUrl.startsWith('/uploads')) {
+          const oldPath = path.join(uploadsDir, cert.photoPublicId);
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        } else {
+          await cloudinary.uploader.destroy(cert.photoPublicId);
+        }
       } catch (err) {
         console.log('Error deleting photo:', err);
       }
@@ -224,8 +239,8 @@ router.get('/certificates/license/:licenseNumber', authMiddleware, async (req, r
 router.get('/certificates-next-number', authMiddleware, async (req, res) => {
   try {
     const lastCert = await Certificate.findOne().sort({ createdAt: -1 });
-    let nextNumber = '461119526041'; // Default starting number
-    
+    let nextNumber = '461119526040'; // Default starting number
+
     if (lastCert && lastCert.healthCertificateNumber) {
       const match = lastCert.healthCertificateNumber.match(/\d+$/);
       if (match) {
@@ -235,7 +250,7 @@ router.get('/certificates-next-number', authMiddleware, async (req, res) => {
         nextNumber = lastCert.healthCertificateNumber + '-1';
       }
     }
-    
+
     res.json({ nextNumber });
   } catch (err) {
     console.error(err);
