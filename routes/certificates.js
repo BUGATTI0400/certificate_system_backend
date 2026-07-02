@@ -83,7 +83,15 @@ router.post('/certificates', authMiddleware, (req, res, next) => {
 
 // dashboard list
 router.get('/certificates', authMiddleware, async (req, res) => {
-  const list = await Certificate.find().sort({ createdAt: -1 }).limit(500);
+  const search = (req.query.search || '').trim();
+  let query = {};
+  if (search) {
+    // escape regex special chars so user input is treated literally
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'i');
+    query = { $or: [{ name: regex }, { nationalId: regex }] };
+  }
+  const list = await Certificate.find(query).sort({ createdAt: -1 }).limit(500);
   const host = req.get('host');
   const proto = req.protocol;
   const updatedList = list.map(doc => {
